@@ -457,6 +457,24 @@ async function takeScreenshot() {
   return screenshot;
 }
 
+async function postDailyTweetWithRetry(maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await postDailyTweet();
+      return;
+    } catch (e) {
+      const isOverloaded = e.message?.includes('overloaded') || e.status === 529;
+      if (attempt < maxRetries && isOverloaded) {
+        console.log(`트윗 실패 (${attempt}/${maxRetries}), 1분 후 재시도...`);
+        await new Promise(r => setTimeout(r, 60000));
+      } else {
+        console.error(`트윗 최종 실패 (${attempt}/${maxRetries}):`, e.message);
+        return;
+      }
+    }
+  }
+}
+
 async function postDailyTweet() {
   if (!twitterClient) return console.log('트위터 키 없음, 스킵');
   try {
@@ -558,14 +576,14 @@ setInterval(() => {
   const utcDay = now.getUTCDay(); // 0=일, 6=토
   if (utcH === 21 && utcM === 30 && lastTweetDate !== today && utcDay !== 0 && utcDay !== 6) {
     lastTweetDate = today;
-    postDailyTweet();
+    postDailyTweetWithRetry();
   }
 }, 60000);
 
 // 수동 트윗 엔드포인트 (cron-job.org: 즉시 응답 후 백그라운드 처리)
 app.get('/api/tweet-now', (req, res) => {
   res.json({ ok: true, message: '트윗 포스팅 시작됨 (백그라운드)' });
-  postDailyTweet().catch(e => console.error('백그라운드 트윗 실패:', e.message));
+  postDailyTweetWithRetry().catch(e => console.error('백그라운드 트윗 실패:', e.message));
 });
 
 if (process.env.NODE_ENV === 'production') {
