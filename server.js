@@ -230,7 +230,7 @@ ${prevSection}
 - 테슬라, 엔비디아 각각 개별 코멘트 필수 (현재 레벨, 지지/저항, 단기 모멘텀)
 - 강세 시나리오 / 약세 시나리오 2가지 간략히 제시
 - 마지막: 투자 마인드셋 한 마디
-- 길이: 20000자
+- 길이: 1200~1600자
 - 문체: "~것 같음", "~보임", "~예상", "명심!" 자연스럽게 사용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
@@ -290,7 +290,7 @@ ${prevSection}
 - 이번 주 가장 인상적이었던 종목/지표 1-2개 집중 분석
 - 강세/약세 시나리오 2가지 간략히 제시
 - 마지막: 주말 투자 마인드셋 한 마디
-- 길이: 20000자
+- 길이: 1200~1600자
 - 구어체 한국어 + 영어 금융 용어 혼용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
@@ -348,7 +348,7 @@ ${prevSection}
 - 다음 주 주목해야 할 섹터/종목 2-3개
 - 강세/약세 시나리오 2가지
 - 마지막: 월요일 장 전 마인드셋 한 마디 ("준비된 자만이 기회를 잡는다" 류)
-- 길이: 20000자
+- 길이: 1200~1600자
 - 구어체 한국어 + 영어 금융 용어 혼용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
@@ -379,7 +379,7 @@ app.get('/api/brief', async (req, res) => {
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
+      max_tokens: 2048,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -609,10 +609,10 @@ async function generateEnglishImage(brief, dayType) {
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
+      max_tokens: 2048,
       messages: [{
         role: 'user',
-        content: `Translate and adapt the following Korean stock market briefing into English. Keep the same structure and length: start with the title line "${header}", then a one-line summary starting with "[Summary] ", then the full analysis in plain text (no markdown). Target 20000 characters.\n\n${brief}`,
+        content: `Translate and adapt the following Korean stock market briefing into English. Keep the same structure and length: start with the title line "${header}", then a one-line summary starting with "[Summary] ", then the full analysis in plain text (no markdown). Target 1200-1600 characters.\n\n${brief}`,
       }],
     });
     enBrief = msg.content[0].text.trim();
@@ -696,7 +696,7 @@ async function postDailyTweet(dayType = 'weekday') {
 
       const msg = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
+        max_tokens: 2048,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: prompt }],
       });
