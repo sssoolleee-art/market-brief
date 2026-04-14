@@ -65,6 +65,33 @@ async function fetchQuotes() {
   return quotes;
 }
 
+async function fetchWeeklyChange(symbol) {
+  const encoded = encodeURIComponent(symbol);
+  const { data } = await axios.get(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encoded}?interval=1d&range=5d`,
+    { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' } }
+  );
+  const result = data.chart.result[0];
+  const closes = result.indicators?.quote?.[0]?.close?.filter(v => v != null);
+  if (!closes || closes.length < 2) return null;
+  const weekStart = closes[0];
+  const weekEnd = closes[closes.length - 1];
+  return ((weekEnd - weekStart) / weekStart) * 100;
+}
+
+async function fetchWeeklyChanges() {
+  const WEEKLY_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', '^VIX', 'BTC-USD', 'ETH-USD', 'GC=F', 'DX-Y.NYB', '^TNX',
+    'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU', 'XLRE', 'XLB', 'XLC', 'TSLA', 'NVDA'];
+  const results = await Promise.allSettled(WEEKLY_SYMBOLS.map(sym => fetchWeeklyChange(sym)));
+  const weekly = {};
+  WEEKLY_SYMBOLS.forEach((sym, i) => {
+    if (results[i].status === 'fulfilled' && results[i].value !== null) {
+      weekly[sym] = results[i].value;
+    }
+  });
+  return weekly;
+}
+
 async function fetchFearGreed() {
   try {
     const { data } = await axios.get('https://api.alternative.me/fng/?limit=1');
@@ -191,6 +218,73 @@ ${prevSection}
 - 마지막: 투자 마인드셋 한 마디
 - 길이: 1200~1600자
 - 문체: "~것 같음", "~보임", "~예상", "명심!" 자연스럽게 사용
+- 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
+}
+
+function buildWeekendPrompt(quotes, weekly, fg, today, news, calendar, prevBrief) {
+  const fw = (sym) => {
+    const w = weekly[sym];
+    if (w == null) return 'N/A';
+    const sign = w >= 0 ? '+' : '';
+    return `${sign}${w.toFixed(2)}%`;
+  };
+  const f = (sym) => {
+    const q = quotes[sym];
+    if (!q) return 'N/A';
+    const sign = q.changePct >= 0 ? '+' : '';
+    const decimals = sym.includes('BTC') || sym.includes('ETH') ? 0 : 2;
+    return `${q.price?.toFixed(decimals)} (${sign}${q.changePct?.toFixed(2)}%)`;
+  };
+
+  const sectorWeekly = Object.keys(SECTOR_LABELS).map(sym => {
+    const w = weekly[sym];
+    const sign = (w ?? 0) >= 0 ? '+' : '';
+    return `  ${SECTOR_LABELS[sym]}: ${w != null ? sign + w.toFixed(2) + '%' : 'N/A'}`;
+  }).join('\n');
+
+  const newsSection = news.length > 0
+    ? `\n[주말 주요 뉴스 헤드라인]\n${news.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
+    : '';
+
+  const calendarSection = calendar.length > 0
+    ? `\n[다음 주 주요 경제 이벤트 (USD)]\n${calendar.map(e =>
+        `  ${e.date} ${e.time} - ${e.title}${e.forecast ? ` | 예측: ${e.forecast}, 이전: ${e.previous}` : ''}`
+      ).join('\n')}`
+    : '';
+
+  const prevSection = prevBrief
+    ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 600)}`
+    : '';
+
+  return `오늘 날짜: ${today} (주말 — 미국 주식시장 휴장)
+
+[이번 주 주간 등락 (주초 대비 주말 종가 기준)]
+주요 지수: SPY ${fw('SPY')} / QQQ ${fw('QQQ')} / IWM ${fw('IWM')} / DIA ${fw('DIA')}
+변동성: VIX 주간 ${fw('^VIX')} | 공포탐욕지수 현재 ${fg.value} (${fg.value_classification})
+매크로: 달러(DXY) 주간 ${fw('DX-Y.NYB')} / 금 주간 ${fw('GC=F')} / 10Y금리 주간 ${fw('^TNX')}
+크립토(주말 실시간): BTC ${f('BTC-USD')} (주간 ${fw('BTC-USD')}) / ETH ${f('ETH-USD')} (주간 ${fw('ETH-USD')})
+주요 종목 주간: TSLA ${fw('TSLA')} / NVDA ${fw('NVDA')}
+섹터 주간 등락:
+${sectorWeekly}
+${newsSection}
+${calendarSection}
+${prevSection}
+
+위 데이터를 바탕으로 주말 위클리 브리핑을 작성해주세요.
+
+[스타일 가이드]
+- 반드시 아래 두 줄로 시작할 것:
+  첫째 줄: "[카지노 마켓] ${today} 주말 위클리 브리핑"
+  둘째 줄: "[요약] " + 이번 주 장의 핵심을 구어체로 40자 이내 한 문장
+  셋째 줄부터 본문 시작
+- 이번 주 전체 흐름과 핵심 테마 정리 (단순 수치 나열 금지)
+- 주간 섹터 로테이션 분석 — 어디로 자금이 몰렸는지
+- BTC/ETH 주말 동향 심층 분석 (주식시장 휴장 동안 크립토 고유 내러티브, 온체인 동향 언급)
+- 다음 주 주목할 이벤트와 시장 영향 전망
+- 강세/약세 시나리오 2가지 간략히 제시
+- 마지막: 주말 투자 마인드셋 한 마디 (쉬는 것도 전략이다 류)
+- 길이: 1200~1600자
+- 구어체 한국어 + 영어 금융 용어 혼용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
 
@@ -457,10 +551,10 @@ async function takeScreenshot() {
   return screenshot;
 }
 
-async function postDailyTweetWithRetry(maxRetries = 3) {
+async function postDailyTweetWithRetry(isWeekend = false, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await postDailyTweet();
+      await postDailyTweet(isWeekend);
       return;
     } catch (e) {
       const isOverloaded = e.message?.includes('overloaded') || e.status === 529;
@@ -475,10 +569,10 @@ async function postDailyTweetWithRetry(maxRetries = 3) {
   }
 }
 
-async function postDailyTweet() {
+async function postDailyTweet(isWeekend = false) {
   if (!twitterClient) return console.log('트위터 키 없음, 스킵');
   try {
-    console.log('트윗 포스팅 시작...');
+    console.log(`트윗 포스팅 시작... (${isWeekend ? '주말 위클리' : '평일 마감'})`);
 
     // 캐시 없으면 브리핑 먼저 생성
     if (!dailyCache.brief) {
@@ -488,7 +582,15 @@ async function postDailyTweet() {
         fetchQuotes(), fetchFearGreed(), fetchNews(), fetchEconomicCalendar(),
       ]);
       const prevBrief = dailyCache.date !== today ? dailyCache.brief : dailyCache.prevBrief;
-      const prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief);
+
+      let prompt;
+      if (isWeekend) {
+        const weekly = await fetchWeeklyChanges();
+        prompt = buildWeekendPrompt(quotes, weekly, fearGreed, today, news, calendar, prevBrief);
+      } else {
+        prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief);
+      }
+
       const msg = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
@@ -497,8 +599,9 @@ async function postDailyTweet() {
       });
       const rawGenerated = msg.content[0].text;
       const genLines = rawGenerated.split('\n');
-      const genTitleIdx = genLines.findIndex(l => l.includes('미장 마감 브리핑'));
-      if (genTitleIdx !== -1) genLines[genTitleIdx] = `[카지노 마켓] ${today} 미장 마감 브리핑`;
+      const titleKeyword = isWeekend ? '주말 위클리 브리핑' : '미장 마감 브리핑';
+      const genTitleIdx = genLines.findIndex(l => l.includes(titleKeyword));
+      if (genTitleIdx !== -1) genLines[genTitleIdx] = `[카지노 마켓] ${today} ${titleKeyword}`;
       const generatedBrief = genLines.join('\n');
       dailyCache = { date: today, brief: generatedBrief, quotes, fearGreed, prevBrief };
       console.log('브리핑 생성 완료');
@@ -554,7 +657,8 @@ async function postDailyTweet() {
     const dateStr = today.slice(5).replace('-', '/');
     const summaryLine = lines.find(l => l.startsWith('[요약]'));
     const summary = summaryLine ? summaryLine.replace('[요약]', '').trim() : '';
-    const tweetText = `카지노마켓 ${dateStr} 미장 마감\n\n"${summary}"\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n#미국주식 #미장 #카지노마켓 #나스닥`;
+    const label = isWeekend ? '주말 위클리' : '미장 마감';
+    const tweetText = `카지노마켓 ${dateStr} ${label}\n\n"${summary}"\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n#미국주식 #미장 #서학개미 #뉴욕증시\n#SP500 #NASDAQ #stocks #investing`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
@@ -566,7 +670,8 @@ async function postDailyTweet() {
   }
 }
 
-// 매일 21:30 UTC (한국 06:30, 미국 ET 16:30) 자동 포스팅
+// 평일 21:30 UTC (한국 06:30, 미국 ET 16:30) 미장 마감 브리핑
+// 주말 13:00 UTC (한국 22:00) 주말 위클리 브리핑
 let lastTweetDate = null;
 setInterval(() => {
   const now = new Date();
@@ -574,16 +679,23 @@ setInterval(() => {
   const utcM = now.getUTCMinutes();
   const today = now.toISOString().split('T')[0];
   const utcDay = now.getUTCDay(); // 0=일, 6=토
-  if (utcH === 21 && utcM === 30 && lastTweetDate !== today && utcDay !== 0 && utcDay !== 6) {
+  const isWeekend = utcDay === 0 || utcDay === 6;
+
+  const weekdayTime = !isWeekend && utcH === 21 && utcM === 30;
+  const weekendTime = isWeekend && utcH === 13 && utcM === 0;
+
+  if ((weekdayTime || weekendTime) && lastTweetDate !== today) {
     lastTweetDate = today;
-    postDailyTweetWithRetry();
+    postDailyTweetWithRetry(isWeekend);
   }
 }, 60000);
 
 // 수동 트윗 엔드포인트 (cron-job.org: 즉시 응답 후 백그라운드 처리)
 app.get('/api/tweet-now', (req, res) => {
-  res.json({ ok: true, message: '트윗 포스팅 시작됨 (백그라운드)' });
-  postDailyTweetWithRetry().catch(e => console.error('백그라운드 트윗 실패:', e.message));
+  const utcDay = new Date().getUTCDay();
+  const isWeekend = utcDay === 0 || utcDay === 6;
+  res.json({ ok: true, message: `트윗 포스팅 시작됨 (${isWeekend ? '주말 위클리' : '평일 마감'})` });
+  postDailyTweetWithRetry(isWeekend).catch(e => console.error('백그라운드 트윗 실패:', e.message));
 });
 
 if (process.env.NODE_ENV === 'production') {
