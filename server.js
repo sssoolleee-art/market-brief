@@ -777,9 +777,9 @@ async function postDailyTweet(dayType = 'weekday') {
     const tweetLabel = { weekday: '미장 마감', saturday: '주간 결산', sunday: '다음 주 프리뷰' }[dayType] || '미장 마감';
 
     const HASHTAGS = {
-      weekday:  '#미국주식 #서학개미 #미장마감 #나스닥 #SP500 #비트코인 #재테크',
-      saturday: '#미국주식 #서학개미 #주간결산 #나스닥 #SP500 #비트코인 #재테크',
-      sunday:   '#미국주식 #서학개미 #주간프리뷰 #나스닥 #SP500 #비트코인 #재테크',
+      weekday:  '#미국주식 #서학개미 #미장마감 #나스닥 #SP500 #비트코인 #재테크\n#stocks #StockMarket #investing #trading #crypto #Bitcoin #MarketClose',
+      saturday: '#미국주식 #서학개미 #주간결산 #나스닥 #SP500 #비트코인 #재테크\n#stocks #StockMarket #investing #WeekInReview #crypto #Bitcoin #finance',
+      sunday:   '#미국주식 #서학개미 #주간프리뷰 #나스닥 #SP500 #비트코인 #재테크\n#stocks #StockMarket #investing #WeekAhead #crypto #Bitcoin #MarketOutlook',
     };
     const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n"${summary}"\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
     const tweetPayload = { text: tweetText };
