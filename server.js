@@ -600,104 +600,27 @@ function generateMarketImage(quotes, fearGreed) {
   return canvas.toBuffer('image/png');
 }
 
-async function generateEnglishImage(brief, quotes, fearGreed, dayType) {
-  // [요약] 줄 추출
-  const summaryLine = brief.split('\n').find(l => l.startsWith('[요약]')) || '';
-  const korSummary = summaryLine.replace('[요약]', '').trim();
+async function generateEnglishImage(brief, dayType) {
+  const headerLabels = { weekday: 'US Market Close', saturday: 'Weekly Wrap-Up', sunday: 'Week Ahead Preview' };
+  const today = new Date().toISOString().split('T')[0];
+  const header = `[CasinoMarket] ${today} ${headerLabels[dayType] || 'US Market'}`;
 
-  // Claude로 한 줄 영어 번역
-  let enSummary = '';
+  let enBrief = '';
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 80,
-      messages: [{ role: 'user', content: `Translate this Korean stock market summary to English in one concise sentence (max 80 chars): "${korSummary}"` }],
+      max_tokens: 600,
+      messages: [{
+        role: 'user',
+        content: `Summarize the following Korean stock market briefing in English. Keep the same structure: start with the title line "${header}", then a one-line summary starting with "[Summary] ", then 4-5 key analysis points in plain text (no markdown). Max 500 characters total.\n\n${brief}`,
+      }],
     });
-    enSummary = msg.content[0].text.trim().replace(/^["']|["']$/g, '');
+    enBrief = msg.content[0].text.trim();
   } catch {
-    enSummary = 'US market summary';
+    enBrief = `${header}\n[Summary] US market briefing unavailable.`;
   }
 
-  const W = 800, H = 320;
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#0f1117';
-  ctx.fillRect(0, 0, W, H);
-
-  // 헤더
-  const today = new Date().toISOString().split('T')[0];
-  const dateStr = today.slice(5).replace('-', '/');
-  const headerLabels = { weekday: 'US Market Close', saturday: 'Weekly Wrap-Up', sunday: 'Week Ahead Preview' };
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillText(`🎰 CasinoMarket  ${dateStr} ${headerLabels[dayType] || 'US Market'}`, 24, 36);
-
-  ctx.fillStyle = '#555';
-  ctx.fillRect(24, 46, W - 48, 1);
-
-  // 영어 요약
-  ctx.fillStyle = '#f0c040';
-  ctx.font = 'italic 15px sans-serif';
-  ctx.fillText(`"${enSummary}"`, 24, 70);
-
-  // 주요 지표 3열
-  const cols = [
-    [
-      { label: 'SPY', sym: 'SPY' },
-      { label: 'QQQ', sym: 'QQQ' },
-      { label: 'IWM', sym: 'IWM' },
-    ],
-    [
-      { label: 'VIX', sym: '^VIX' },
-      { label: 'BTC', sym: 'BTC-USD' },
-      { label: 'Gold', sym: 'GC=F' },
-    ],
-    [
-      { label: 'DXY', sym: 'DX-Y.NYB' },
-      { label: '10Y', sym: '^TNX', yield: true },
-      { label: 'ETH', sym: 'ETH-USD' },
-    ],
-  ];
-
-  cols.forEach((col, ci) => {
-    col.forEach(({ label, sym, yield: isYield }, ri) => {
-      const q = quotes?.[sym];
-      const x = 24 + ci * 255;
-      const y = 100 + ri * 60;
-      const up = (q?.changePct ?? 0) >= 0;
-
-      ctx.fillStyle = '#888';
-      ctx.font = '12px sans-serif';
-      ctx.fillText(label, x, y);
-
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 15px sans-serif';
-      let priceStr = 'N/A';
-      if (q) {
-        if (sym.includes('BTC') || sym.includes('ETH')) priceStr = `$${q.price.toLocaleString('en', { maximumFractionDigits: 0 })}`;
-        else if (isYield) priceStr = `${q.price.toFixed(3)}%`;
-        else priceStr = `${q.price.toFixed(2)}`;
-      }
-      ctx.fillText(priceStr, x, y + 18);
-
-      ctx.fillStyle = up ? '#00c87a' : '#ff4d4d';
-      ctx.font = '13px sans-serif';
-      const sign = up ? '+' : '';
-      ctx.fillText(q ? `${sign}${q.changePct.toFixed(2)}%` : '', x, y + 34);
-    });
-  });
-
-  // 공포탐욕
-  ctx.fillStyle = '#888';
-  ctx.font = '12px sans-serif';
-  ctx.fillText(`Fear & Greed: ${fearGreed?.value ?? 'N/A'} (${fearGreed?.value_classification ?? ''})`, 24, 280);
-
-  ctx.fillStyle = '#333';
-  ctx.font = '11px sans-serif';
-  ctx.fillText('casinomarket.info', W - 130, 300);
-
-  return canvas.toBuffer('image/png');
+  return generateTextImage(enBrief);
 }
 
 async function takeScreenshot() {
