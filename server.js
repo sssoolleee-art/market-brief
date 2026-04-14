@@ -131,6 +131,20 @@ async function fetchEconomicCalendar() {
   }
 }
 
+async function fetchNextWeekCalendar() {
+  try {
+    const { data } = await axios.get(
+      'https://nfs.faireconomy.media/ff_calendar_nextweek.json',
+      { timeout: 6000 }
+    );
+    return data
+      .filter(e => e.country === 'USD' && (e.impact === 'High' || e.impact === 'Medium'))
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
 function buildPrompt(quotes, fg, today, news, calendar, prevBrief) {
   const f = (sym) => {
     const q = quotes[sym];
@@ -221,7 +235,7 @@ ${prevSection}
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
 
-function buildWeekendPrompt(quotes, weekly, fg, today, news, calendar, prevBrief) {
+function buildSaturdayPrompt(quotes, weekly, fg, today, news, prevBrief) {
   const fw = (sym) => {
     const w = weekly[sym];
     if (w == null) return 'N/A';
@@ -243,22 +257,16 @@ function buildWeekendPrompt(quotes, weekly, fg, today, news, calendar, prevBrief
   }).join('\n');
 
   const newsSection = news.length > 0
-    ? `\n[주말 주요 뉴스 헤드라인]\n${news.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
-    : '';
-
-  const calendarSection = calendar.length > 0
-    ? `\n[다음 주 주요 경제 이벤트 (USD)]\n${calendar.map(e =>
-        `  ${e.date} ${e.time} - ${e.title}${e.forecast ? ` | 예측: ${e.forecast}, 이전: ${e.previous}` : ''}`
-      ).join('\n')}`
+    ? `\n[이번 주 주요 뉴스 헤드라인]\n${news.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
     : '';
 
   const prevSection = prevBrief
     ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 600)}`
     : '';
 
-  return `오늘 날짜: ${today} (주말 — 미국 주식시장 휴장)
+  return `오늘 날짜: ${today} (토요일 — 미국 주식시장 휴장)
 
-[이번 주 주간 등락 (주초 대비 주말 종가 기준)]
+[이번 주 주간 등락 결산]
 주요 지수: SPY ${fw('SPY')} / QQQ ${fw('QQQ')} / IWM ${fw('IWM')} / DIA ${fw('DIA')}
 변동성: VIX 주간 ${fw('^VIX')} | 공포탐욕지수 현재 ${fg.value} (${fg.value_classification})
 매크로: 달러(DXY) 주간 ${fw('DX-Y.NYB')} / 금 주간 ${fw('GC=F')} / 10Y금리 주간 ${fw('^TNX')}
@@ -267,22 +275,79 @@ function buildWeekendPrompt(quotes, weekly, fg, today, news, calendar, prevBrief
 섹터 주간 등락:
 ${sectorWeekly}
 ${newsSection}
-${calendarSection}
 ${prevSection}
 
-위 데이터를 바탕으로 주말 위클리 브리핑을 작성해주세요.
+위 데이터를 바탕으로 토요일 주간 결산 브리핑을 작성해주세요.
 
 [스타일 가이드]
 - 반드시 아래 두 줄로 시작할 것:
-  첫째 줄: "[카지노 마켓] ${today} 주말 위클리 브리핑"
+  첫째 줄: "[카지노 마켓] ${today} 주간 결산"
   둘째 줄: "[요약] " + 이번 주 장의 핵심을 구어체로 40자 이내 한 문장
   셋째 줄부터 본문 시작
-- 이번 주 전체 흐름과 핵심 테마 정리 (단순 수치 나열 금지)
-- 주간 섹터 로테이션 분석 — 어디로 자금이 몰렸는지
-- BTC/ETH 주말 동향 심층 분석 (주식시장 휴장 동안 크립토 고유 내러티브, 온체인 동향 언급)
-- 다음 주 주목할 이벤트와 시장 영향 전망
+- 이번 주 전체 흐름과 핵심 테마 정리 — 한 주를 관통한 내러티브가 무엇이었는지
+- 주간 섹터 로테이션 심층 분석 — 어디로 자금이 몰렸고 어디서 빠졌는지, 그 이유
+- BTC/ETH 주말 실시간 동향 — 주식시장 휴장 중 크립토 고유 움직임, 나스닥과 디커플링 여부
+- 이번 주 가장 인상적이었던 종목/지표 1-2개 집중 분석
 - 강세/약세 시나리오 2가지 간략히 제시
-- 마지막: 주말 투자 마인드셋 한 마디 (쉬는 것도 전략이다 류)
+- 마지막: 주말 투자 마인드셋 한 마디
+- 길이: 1200~1600자
+- 구어체 한국어 + 영어 금융 용어 혼용
+- 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
+}
+
+function buildSundayPrompt(quotes, weekly, fg, today, news, nextWeekCalendar, prevBrief) {
+  const fw = (sym) => {
+    const w = weekly[sym];
+    if (w == null) return 'N/A';
+    const sign = w >= 0 ? '+' : '';
+    return `${sign}${w.toFixed(2)}%`;
+  };
+  const f = (sym) => {
+    const q = quotes[sym];
+    if (!q) return 'N/A';
+    const sign = q.changePct >= 0 ? '+' : '';
+    const decimals = sym.includes('BTC') || sym.includes('ETH') ? 0 : 2;
+    return `${q.price?.toFixed(decimals)} (${sign}${q.changePct?.toFixed(2)}%)`;
+  };
+
+  const calendarSection = nextWeekCalendar.length > 0
+    ? `\n[다음 주 주요 경제 이벤트 (USD)]\n${nextWeekCalendar.map(e =>
+        `  ${e.date} ${e.time} - ${e.title}${e.forecast ? ` | 예측: ${e.forecast}, 이전: ${e.previous}` : ''}`
+      ).join('\n')}`
+    : '';
+
+  const newsSection = news.length > 0
+    ? `\n[최신 뉴스 헤드라인]\n${news.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
+    : '';
+
+  const prevSection = prevBrief
+    ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 600)}`
+    : '';
+
+  return `오늘 날짜: ${today} (일요일 — 내일 월요일 장 시작 전날)
+
+[현재 시장 상태 (이번 주 주간 등락 참고)]
+주요 지수 주간: SPY ${fw('SPY')} / QQQ ${fw('QQQ')} / IWM ${fw('IWM')}
+공포탐욕지수: ${fg.value} (${fg.value_classification})
+크립토 실시간: BTC ${f('BTC-USD')} (주간 ${fw('BTC-USD')}) / ETH ${f('ETH-USD')} (주간 ${fw('ETH-USD')})
+매크로 참고: 달러(DXY) 주간 ${fw('DX-Y.NYB')} / 금 주간 ${fw('GC=F')} / 10Y금리 주간 ${fw('^TNX')}
+${calendarSection}
+${newsSection}
+${prevSection}
+
+위 데이터를 바탕으로 일요일 다음 주 프리뷰 브리핑을 작성해주세요.
+
+[스타일 가이드]
+- 반드시 아래 두 줄로 시작할 것:
+  첫째 줄: "[카지노 마켓] ${today} 다음 주 프리뷰"
+  둘째 줄: "[요약] " + 다음 주 핵심 포인트를 구어체로 40자 이내 한 문장
+  셋째 줄부터 본문 시작
+- 다음 주 주요 경제 이벤트 각각의 시장 영향 전망 (FOMC, CPI, 고용지표 등 있으면 심층 분석)
+- 이번 주 흐름을 바탕으로 월요일 갭업/갭다운 가능성 시나리오
+- BTC/ETH 일요일 실시간 동향 — 주말 이틀간의 변화, 월요일 크립토 방향성
+- 다음 주 주목해야 할 섹터/종목 2-3개
+- 강세/약세 시나리오 2가지
+- 마지막: 월요일 장 전 마인드셋 한 마디 ("준비된 자만이 기회를 잡는다" 류)
 - 길이: 1200~1600자
 - 구어체 한국어 + 영어 금융 용어 혼용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
@@ -535,6 +600,106 @@ function generateMarketImage(quotes, fearGreed) {
   return canvas.toBuffer('image/png');
 }
 
+async function generateEnglishImage(brief, quotes, fearGreed, dayType) {
+  // [요약] 줄 추출
+  const summaryLine = brief.split('\n').find(l => l.startsWith('[요약]')) || '';
+  const korSummary = summaryLine.replace('[요약]', '').trim();
+
+  // Claude로 한 줄 영어 번역
+  let enSummary = '';
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 80,
+      messages: [{ role: 'user', content: `Translate this Korean stock market summary to English in one concise sentence (max 80 chars): "${korSummary}"` }],
+    });
+    enSummary = msg.content[0].text.trim().replace(/^["']|["']$/g, '');
+  } catch {
+    enSummary = 'US market summary';
+  }
+
+  const W = 800, H = 320;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#0f1117';
+  ctx.fillRect(0, 0, W, H);
+
+  // 헤더
+  const today = new Date().toISOString().split('T')[0];
+  const dateStr = today.slice(5).replace('-', '/');
+  const headerLabels = { weekday: 'US Market Close', saturday: 'Weekly Wrap-Up', sunday: 'Week Ahead Preview' };
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText(`🎰 CasinoMarket  ${dateStr} ${headerLabels[dayType] || 'US Market'}`, 24, 36);
+
+  ctx.fillStyle = '#555';
+  ctx.fillRect(24, 46, W - 48, 1);
+
+  // 영어 요약
+  ctx.fillStyle = '#f0c040';
+  ctx.font = 'italic 15px sans-serif';
+  ctx.fillText(`"${enSummary}"`, 24, 70);
+
+  // 주요 지표 3열
+  const cols = [
+    [
+      { label: 'SPY', sym: 'SPY' },
+      { label: 'QQQ', sym: 'QQQ' },
+      { label: 'IWM', sym: 'IWM' },
+    ],
+    [
+      { label: 'VIX', sym: '^VIX' },
+      { label: 'BTC', sym: 'BTC-USD' },
+      { label: 'Gold', sym: 'GC=F' },
+    ],
+    [
+      { label: 'DXY', sym: 'DX-Y.NYB' },
+      { label: '10Y', sym: '^TNX', yield: true },
+      { label: 'ETH', sym: 'ETH-USD' },
+    ],
+  ];
+
+  cols.forEach((col, ci) => {
+    col.forEach(({ label, sym, yield: isYield }, ri) => {
+      const q = quotes?.[sym];
+      const x = 24 + ci * 255;
+      const y = 100 + ri * 60;
+      const up = (q?.changePct ?? 0) >= 0;
+
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(label, x, y);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 15px sans-serif';
+      let priceStr = 'N/A';
+      if (q) {
+        if (sym.includes('BTC') || sym.includes('ETH')) priceStr = `$${q.price.toLocaleString('en', { maximumFractionDigits: 0 })}`;
+        else if (isYield) priceStr = `${q.price.toFixed(3)}%`;
+        else priceStr = `${q.price.toFixed(2)}`;
+      }
+      ctx.fillText(priceStr, x, y + 18);
+
+      ctx.fillStyle = up ? '#00c87a' : '#ff4d4d';
+      ctx.font = '13px sans-serif';
+      const sign = up ? '+' : '';
+      ctx.fillText(q ? `${sign}${q.changePct.toFixed(2)}%` : '', x, y + 34);
+    });
+  });
+
+  // 공포탐욕
+  ctx.fillStyle = '#888';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(`Fear & Greed: ${fearGreed?.value ?? 'N/A'} (${fearGreed?.value_classification ?? ''})`, 24, 280);
+
+  ctx.fillStyle = '#333';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('casinomarket.info', W - 130, 300);
+
+  return canvas.toBuffer('image/png');
+}
+
 async function takeScreenshot() {
   const browser = await puppeteer.launch({
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -551,10 +716,17 @@ async function takeScreenshot() {
   return screenshot;
 }
 
-async function postDailyTweetWithRetry(isWeekend = false, maxRetries = 3) {
+function getDayType() {
+  const d = new Date().getUTCDay();
+  if (d === 6) return 'saturday';
+  if (d === 0) return 'sunday';
+  return 'weekday';
+}
+
+async function postDailyTweetWithRetry(dayType = 'weekday', maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await postDailyTweet(isWeekend);
+      await postDailyTweet(dayType);
       return;
     } catch (e) {
       const isOverloaded = e.message?.includes('overloaded') || e.status === 529;
@@ -569,25 +741,33 @@ async function postDailyTweetWithRetry(isWeekend = false, maxRetries = 3) {
   }
 }
 
-async function postDailyTweet(isWeekend = false) {
+const DAY_LABEL = { weekday: '평일 마감', saturday: '주간 결산', sunday: '다음 주 프리뷰' };
+
+async function postDailyTweet(dayType = 'weekday') {
   if (!twitterClient) return console.log('트위터 키 없음, 스킵');
   try {
-    console.log(`트윗 포스팅 시작... (${isWeekend ? '주말 위클리' : '평일 마감'})`);
+    console.log(`트윗 포스팅 시작... (${DAY_LABEL[dayType]})`);
 
     // 캐시 없으면 브리핑 먼저 생성
     if (!dailyCache.brief) {
       console.log('브리핑 캐시 없음, 생성 중...');
       const today = new Date().toISOString().split('T')[0];
-      const [quotes, fearGreed, news, calendar] = await Promise.all([
-        fetchQuotes(), fetchFearGreed(), fetchNews(), fetchEconomicCalendar(),
+      const [quotes, fearGreed, news] = await Promise.all([
+        fetchQuotes(), fetchFearGreed(), fetchNews(),
       ]);
       const prevBrief = dailyCache.date !== today ? dailyCache.brief : dailyCache.prevBrief;
 
       let prompt;
-      if (isWeekend) {
+      if (dayType === 'saturday') {
         const weekly = await fetchWeeklyChanges();
-        prompt = buildWeekendPrompt(quotes, weekly, fearGreed, today, news, calendar, prevBrief);
+        prompt = buildSaturdayPrompt(quotes, weekly, fearGreed, today, news, prevBrief);
+      } else if (dayType === 'sunday') {
+        const [weekly, nextWeekCalendar] = await Promise.all([
+          fetchWeeklyChanges(), fetchNextWeekCalendar(),
+        ]);
+        prompt = buildSundayPrompt(quotes, weekly, fearGreed, today, news, nextWeekCalendar, prevBrief);
       } else {
+        const calendar = await fetchEconomicCalendar();
         prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief);
       }
 
@@ -599,9 +779,10 @@ async function postDailyTweet(isWeekend = false) {
       });
       const rawGenerated = msg.content[0].text;
       const genLines = rawGenerated.split('\n');
-      const titleKeyword = isWeekend ? '주말 위클리 브리핑' : '미장 마감 브리핑';
-      const genTitleIdx = genLines.findIndex(l => l.includes(titleKeyword));
-      if (genTitleIdx !== -1) genLines[genTitleIdx] = `[카지노 마켓] ${today} ${titleKeyword}`;
+      const titleKeywords = { weekday: '미장 마감 브리핑', saturday: '주간 결산', sunday: '다음 주 프리뷰' };
+      const titleKw = titleKeywords[dayType];
+      const genTitleIdx = genLines.findIndex(l => l.includes(titleKw));
+      if (genTitleIdx !== -1) genLines[genTitleIdx] = `[카지노 마켓] ${today} ${titleKw}`;
       const generatedBrief = genLines.join('\n');
       dailyCache = { date: today, brief: generatedBrief, quotes, fearGreed, prevBrief };
       console.log('브리핑 생성 완료');
@@ -642,23 +823,42 @@ async function postDailyTweet(isWeekend = false) {
         console.error('히트맵 실패:', hmErr.message);
       }
 
-      // 3. 브리핑 텍스트
+      // 3. 브리핑 텍스트 (한글)
       console.log('텍스트 이미지 생성 중...');
       const textBuf = generateTextImage(brief);
       const textId = await twitterClient.v1.uploadMedia(textBuf, { mimeType: 'image/png' });
       mediaIds.push(textId);
       console.log('텍스트 이미지 완료');
+
+      // 4. 영어 요약 이미지 (4장 이하일 때만)
+      if (mediaIds.length < 4) {
+        try {
+          console.log('영어 이미지 생성 중...');
+          const enBuf = await generateEnglishImage(brief, quotes, dailyCache.fearGreed, dayType);
+          const enId = await twitterClient.v1.uploadMedia(enBuf, { mimeType: 'image/png' });
+          mediaIds.push(enId);
+          console.log('영어 이미지 완료');
+        } catch (enErr) {
+          console.error('영어 이미지 실패:', enErr.message);
+        }
+      }
     } catch (imgErr) {
       console.error('이미지 생성 실패:', imgErr.message);
     }
 
-    // 단일 트윗: 제목 + 지표 + 두 이미지
+    // 단일 트윗: 제목 + 지표 + 이미지들
     const today = dailyCache.date || new Date().toISOString().split('T')[0];
     const dateStr = today.slice(5).replace('-', '/');
     const summaryLine = lines.find(l => l.startsWith('[요약]'));
     const summary = summaryLine ? summaryLine.replace('[요약]', '').trim() : '';
-    const label = isWeekend ? '주말 위클리' : '미장 마감';
-    const tweetText = `카지노마켓 ${dateStr} ${label}\n\n"${summary}"\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n#미국주식 #미장 #서학개미 #뉴욕증시\n#SP500 #NASDAQ #stocks #investing`;
+    const tweetLabel = { weekday: '미장 마감', saturday: '주간 결산', sunday: '다음 주 프리뷰' }[dayType] || '미장 마감';
+
+    const HASHTAGS = {
+      weekday:  '#미국주식 #서학개미 #미장마감 #나스닥 #SP500 #비트코인 #재테크',
+      saturday: '#미국주식 #서학개미 #주간결산 #나스닥 #SP500 #비트코인 #재테크',
+      sunday:   '#미국주식 #서학개미 #주간프리뷰 #나스닥 #SP500 #비트코인 #재테크',
+    };
+    const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n"${summary}"\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
@@ -671,31 +871,30 @@ async function postDailyTweet(isWeekend = false) {
 }
 
 // 평일 21:30 UTC (한국 06:30, 미국 ET 16:30) 미장 마감 브리핑
-// 주말 13:00 UTC (한국 22:00) 주말 위클리 브리핑
+// 토요일 13:00 UTC (한국 22:00) 주간 결산
+// 일요일 13:00 UTC (한국 22:00) 다음 주 프리뷰
 let lastTweetDate = null;
 setInterval(() => {
   const now = new Date();
   const utcH = now.getUTCHours();
   const utcM = now.getUTCMinutes();
   const today = now.toISOString().split('T')[0];
-  const utcDay = now.getUTCDay(); // 0=일, 6=토
-  const isWeekend = utcDay === 0 || utcDay === 6;
+  const dayType = getDayType();
 
-  const weekdayTime = !isWeekend && utcH === 21 && utcM === 30;
-  const weekendTime = isWeekend && utcH === 13 && utcM === 0;
+  const weekdayTime = dayType === 'weekday' && utcH === 21 && utcM === 30;
+  const weekendTime = (dayType === 'saturday' || dayType === 'sunday') && utcH === 13 && utcM === 0;
 
   if ((weekdayTime || weekendTime) && lastTweetDate !== today) {
     lastTweetDate = today;
-    postDailyTweetWithRetry(isWeekend);
+    postDailyTweetWithRetry(dayType);
   }
 }, 60000);
 
 // 수동 트윗 엔드포인트 (cron-job.org: 즉시 응답 후 백그라운드 처리)
 app.get('/api/tweet-now', (req, res) => {
-  const utcDay = new Date().getUTCDay();
-  const isWeekend = utcDay === 0 || utcDay === 6;
-  res.json({ ok: true, message: `트윗 포스팅 시작됨 (${isWeekend ? '주말 위클리' : '평일 마감'})` });
-  postDailyTweetWithRetry(isWeekend).catch(e => console.error('백그라운드 트윗 실패:', e.message));
+  const dayType = getDayType();
+  res.json({ ok: true, message: `트윗 포스팅 시작됨 (${DAY_LABEL[dayType]})` });
+  postDailyTweetWithRetry(dayType).catch(e => console.error('백그라운드 트윗 실패:', e.message));
 });
 
 if (process.env.NODE_ENV === 'production') {
