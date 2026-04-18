@@ -822,8 +822,8 @@ async function postDailyTweet(dayType = 'weekday') {
   try {
     console.log(`트윗 포스팅 시작... (${DAY_LABEL[dayType]})`);
 
-    // 캐시 없으면 브리핑 먼저 생성
-    if (!dailyCache.brief) {
+    // 캐시 없으면 브리핑 먼저 생성 (주말은 항상 새로 생성)
+    if (!dailyCache.brief || dayType === 'saturday' || dayType === 'sunday') {
       console.log('브리핑 캐시 없음, 생성 중...');
       const today = new Date().toISOString().split('T')[0];
       const [quotes, fearGreed, news] = await Promise.all([
