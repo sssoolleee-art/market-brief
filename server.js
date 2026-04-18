@@ -51,7 +51,11 @@ async function fetchOneQuote(symbol) {
   const volume = meta.regularMarketVolume || null;
   const avgVolume = meta.averageDailyVolume3Month || null;
   const volRatio = (volume && avgVolume) ? volume / avgVolume : null;
-  return { price, changePct, change: price - (prev || price), volume, avgVolume, volRatio };
+  const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh || null;
+  const fiftyTwoWeekLow = meta.fiftyTwoWeekLow || null;
+  const fiftyDayAverage = meta.fiftyDayAverage || null;
+  const twoHundredDayAverage = meta.twoHundredDayAverage || null;
+  return { price, changePct, change: price - (prev || price), volume, avgVolume, volRatio, fiftyTwoWeekHigh, fiftyTwoWeekLow, fiftyDayAverage, twoHundredDayAverage };
 }
 
 async function fetchQuotes() {
@@ -80,8 +84,13 @@ async function fetchWeeklyChange(symbol) {
 }
 
 async function fetchWeeklyChanges() {
-  const WEEKLY_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', '^VIX', 'BTC-USD', 'ETH-USD', 'GC=F', 'DX-Y.NYB', '^TNX',
-    'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU', 'XLRE', 'XLB', 'XLC', 'TSLA', 'NVDA'];
+  const WEEKLY_SYMBOLS = [
+    'SPY', 'QQQ', 'IWM', 'DIA', '^VIX', 'BTC-USD', 'ETH-USD',
+    'GC=F', 'CL=F', 'DX-Y.NYB', '^TNX', '^IRX', '^FVX',
+    'HYG', 'JNK', 'TLT',
+    'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU', 'XLRE', 'XLB', 'XLC',
+    'TSLA', 'NVDA', 'AAPL', 'MSFT', 'META',
+  ];
   const results = await Promise.allSettled(WEEKLY_SYMBOLS.map(sym => fetchWeeklyChange(sym)));
   const weekly = {};
   WEEKLY_SYMBOLS.forEach((sym, i) => {
@@ -94,10 +103,15 @@ async function fetchWeeklyChanges() {
 
 async function fetchFearGreed() {
   try {
-    const { data } = await axios.get('https://api.alternative.me/fng/?limit=1');
-    return data.data[0];
+    const { data } = await axios.get('https://api.alternative.me/fng/?limit=7');
+    const latest = data.data[0];
+    const trend = data.data.slice(0, 7).map(d => Number(d.value));
+    const trendDir = trend.length >= 2
+      ? (trend[0] > trend[trend.length - 1] ? '▲상승중' : '▼하락중')
+      : '';
+    return { ...latest, trend: trend.join('→'), trendDir };
   } catch {
-    return { value: 'N/A', value_classification: 'Unknown' };
+    return { value: 'N/A', value_classification: 'Unknown', trend: '', trendDir: '' };
   }
 }
 
@@ -145,7 +159,36 @@ async function fetchNextWeekCalendar() {
   }
 }
 
-function buildPrompt(quotes, fg, today, news, calendar, prevBrief) {
+async function fetchEarningsNextWeek() {
+  try {
+    const today = new Date();
+    const results = [];
+    // 다음 주 월~금 날짜 생성
+    const daysUntilMonday = (8 - today.getUTCDay()) % 7 || 7;
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(today);
+      d.setUTCDate(today.getUTCDate() + daysUntilMonday + i);
+      const dateStr = d.toISOString().split('T')[0];
+      try {
+        const { data } = await axios.get(
+          `https://api.nasdaq.com/api/calendar/earnings?date=${dateStr}`,
+          { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }, timeout: 6000 }
+        );
+        const rows = data?.data?.rows || [];
+        const major = rows.filter(r => {
+          const sym = (r.symbol || '').toUpperCase();
+          return ['TSLA','NVDA','AAPL','MSFT','META','AMZN','GOOGL','NFLX','AMD','INTC','PLTR','COIN'].includes(sym);
+        }).map(r => `${r.symbol}(${dateStr.slice(5)})`);
+        results.push(...major);
+      } catch {}
+    }
+    return results.length > 0 ? results : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildPrompt(quotes, fg, today, news, calendar, prevBrief, earnings) {
   const f = (sym) => {
     const q = quotes[sym];
     if (!q) return 'N/A';
@@ -159,6 +202,18 @@ function buildPrompt(quotes, fg, today, news, calendar, prevBrief) {
     if (!q) return 'N/A';
     const sign = q.changePct >= 0 ? '+' : '';
     return `${q.price?.toFixed(3)}% (${sign}${q.changePct?.toFixed(2)}%)`;
+  };
+
+  const fLevel = (sym) => {
+    const q = quotes[sym];
+    if (!q || !q.twoHundredDayAverage) return '';
+    const ma200 = q.twoHundredDayAverage;
+    const ma50 = q.fiftyDayAverage;
+    const pct200 = ((q.price - ma200) / ma200 * 100).toFixed(1);
+    const pct52h = q.fiftyTwoWeekHigh ? ((q.price - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh * 100).toFixed(1) : null;
+    const ma50str = ma50 ? ` | 50MA ${ma50.toFixed(2)}` : '';
+    const h52str = pct52h ? ` | 52주고점대비 ${pct52h}%` : '';
+    return ` [200MA ${ma200.toFixed(2)} (${pct200 >= 0 ? '+' : ''}${pct200}%)${ma50str}${h52str}]`;
   };
 
   const yc10 = quotes['^TNX']?.price;
@@ -191,24 +246,31 @@ function buildPrompt(quotes, fg, today, news, calendar, prevBrief) {
       ).join('\n')}`
     : '';
 
-  const prevSection = prevBrief
-    ? `\n[전날 브리핑 (연속성 참고용 - 직접 인용하지 말 것)]\n${prevBrief.slice(0, 600)}`
+  const earningsSection = earnings?.length > 0
+    ? `\n[다음 주 주요 어닝 일정]\n  ${earnings.join(', ')}`
     : '';
+
+  const prevSection = prevBrief
+    ? `\n[전날 브리핑 (연속성 참고용 - 직접 인용하지 말 것)]\n${prevBrief.slice(0, 1000)}`
+    : '';
+
+  const fgTrend = fg.trend ? ` | 7일 추세: ${fg.trend} ${fg.trendDir}` : '';
 
   return `오늘 날짜: ${today}
 
 [오늘의 미장 데이터]
-주요 지수: SPY ${f('SPY')}${volNote('SPY')} / QQQ ${f('QQQ')}${volNote('QQQ')} / IWM ${f('IWM')} / DIA ${f('DIA')}
-변동성: VIX ${f('^VIX')} | 공포탐욕지수 ${fg.value} (${fg.value_classification})
+주요 지수: SPY ${f('SPY')}${fLevel('SPY')}${volNote('SPY')} / QQQ ${f('QQQ')}${fLevel('QQQ')}${volNote('QQQ')} / IWM ${f('IWM')} / DIA ${f('DIA')}
+변동성: VIX ${f('^VIX')} | 공포탐욕지수 ${fg.value} (${fg.value_classification})${fgTrend}
 채권: HYG ${f('HYG')} / JNK ${f('JNK')} / TLT ${f('TLT')}
 수익률 커브: 3개월 ${fYield('^IRX')} / 5년 ${fYield('^FVX')} / 10년 ${fYield('^TNX')} | 3M-10Y 스프레드: ${ycSpread}%${ycLabel}
 매크로: 달러(DXY) ${f('DX-Y.NYB')} / 금 ${f('GC=F')} / 오일(WTI) ${f('CL=F')}
 크립토: BTC ${f('BTC-USD')} / ETH ${f('ETH-USD')}
-주요종목: TSLA ${f('TSLA')}${volNote('TSLA')} / NVDA ${f('NVDA')}${volNote('NVDA')} / AAPL ${f('AAPL')} / MSFT ${f('MSFT')} / META ${f('META')}
+주요종목: TSLA ${f('TSLA')}${fLevel('TSLA')}${volNote('TSLA')} / NVDA ${f('NVDA')}${fLevel('NVDA')}${volNote('NVDA')} / AAPL ${f('AAPL')}${fLevel('AAPL')} / MSFT ${f('MSFT')}${fLevel('MSFT')} / META ${f('META')}${fLevel('META')}
 섹터별 등락:
 ${sectorLines}
 ${newsSection}
 ${calendarSection}
+${earningsSection}
 ${prevSection}
 
 위 데이터를 바탕으로 오늘의 미장 마감 브리핑을 작성해주세요.
@@ -224,18 +286,22 @@ ${prevSection}
 - 수익률 커브 상태와 경기 사이클 시사점 반드시 언급
 - 거래량 이상 시 특별히 언급
 - 오늘 주요 뉴스와 가격 움직임의 인과관계 분석
-- 이번 주 남은 주요 이벤트가 시장에 미칠 영향 전망
-- 오늘 장에서 특이한 점, 눈에 띄는 섹터 로테이션 언급
-- BTC, ETH 각각 개별 코멘트 필수 (나스닥과의 상관관계, 디커플링 여부, 크립토 고유 내러티브)
-- 테슬라, 엔비디아 각각 개별 코멘트 필수 (현재 레벨, 지지/저항, 단기 모멘텀)
-- 강세 시나리오 / 약세 시나리오 2가지 간략히 제시
+- 200MA, 50MA 대비 현재 위치 → "위에 있으면 강세 구조 유지" / "아래 깨지면 위험" 식으로 의미 해석 필수
+- 52주 고점 대비 위치로 현재 가격이 어느 사이클인지 맥락 제공
+- BTC, ETH 각각 개별 코멘트 필수 (나스닥과의 상관관계, 디커플링 여부)
+- TSLA, NVDA 각각 개별 코멘트 필수 (현재 레벨 vs MA, 지지/저항, 단기 모멘텀)
+- AAPL, MSFT 중 오늘 움직임이 의미 있는 쪽 코멘트
+- 공포탐욕지수 7일 추세 해석 — 방향성이 바뀌는 중인지, 극단값에서 반전 가능성 있는지
+- [강세 시나리오] 구체적 조건 + "이 경우 SPY/QQQ 어느 레벨까지 열린다" 식으로 작성
+- [약세 시나리오] 구체적 조건 + "이 경우 어느 레벨이 1차 지지, 거기서 반등 못 하면 어디까지"
+- [다음 주 주목 이벤트] 어닝 일정 있으면 구체적으로 — "NVDA 실적 전 포지션 어떻게 관리할지"
+- [투자 액션 제안] 현재 상황에서 관망/분할매수/헷지 중 어느 전략이 유리한지 한 줄로 명시
 - 마지막: 투자 마인드셋 한 마디
-- 길이: 1200~1600자
-- 문체: "~것 같음", "~보임", "~예상", "명심!" 자연스럽게 사용
+- 길이: 1400~1800자
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
 
-function buildSaturdayPrompt(quotes, weekly, fg, today, news, prevBrief) {
+function buildSaturdayPrompt(quotes, weekly, fg, today, news, prevBrief, nextWeekCalendar, earnings) {
   const fw = (sym) => {
     const w = weekly[sym];
     if (w == null) return 'N/A';
@@ -249,6 +315,22 @@ function buildSaturdayPrompt(quotes, weekly, fg, today, news, prevBrief) {
     const decimals = sym.includes('BTC') || sym.includes('ETH') ? 0 : 2;
     return `${q.price?.toFixed(decimals)} (${sign}${q.changePct?.toFixed(2)}%)`;
   };
+
+  const fLevel = (sym) => {
+    const q = quotes[sym];
+    if (!q || !q.twoHundredDayAverage) return '';
+    const ma200 = q.twoHundredDayAverage;
+    const pct200 = ((q.price - ma200) / ma200 * 100).toFixed(1);
+    const pct52h = q.fiftyTwoWeekHigh ? ((q.price - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh * 100).toFixed(1) : null;
+    const h52str = pct52h ? ` | 52주고점대비 ${pct52h}%` : '';
+    return ` [200MA ${ma200.toFixed(2)} (${pct200 >= 0 ? '+' : ''}${pct200}%)${h52str}]`;
+  };
+
+  const yc10w = weekly['^TNX'];
+  const yc3mw = weekly['^IRX'];
+  const ycWeeklyNote = (yc10w != null && yc3mw != null)
+    ? `커브 변화: 3M ${yc3mw >= 0 ? '+' : ''}${yc3mw?.toFixed(2)}% / 10Y ${yc10w >= 0 ? '+' : ''}${yc10w?.toFixed(2)}%`
+    : '';
 
   const sectorWeekly = Object.keys(SECTOR_LABELS).map(sym => {
     const w = weekly[sym];
@@ -260,21 +342,37 @@ function buildSaturdayPrompt(quotes, weekly, fg, today, news, prevBrief) {
     ? `\n[이번 주 주요 뉴스 헤드라인]\n${news.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
     : '';
 
-  const prevSection = prevBrief
-    ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 600)}`
+  const nextWeekSection = nextWeekCalendar?.length > 0
+    ? `\n[다음 주 주요 경제 이벤트 (USD)]\n${nextWeekCalendar.map(e =>
+        `  ${e.date} ${e.time} - ${e.title}${e.forecast ? ` | 예측: ${e.forecast}, 이전: ${e.previous}` : ''}`
+      ).join('\n')}`
     : '';
+
+  const earningsSection = earnings?.length > 0
+    ? `\n[다음 주 주요 어닝 일정]\n  ${earnings.join(', ')}`
+    : '';
+
+  const prevSection = prevBrief
+    ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 1000)}`
+    : '';
+
+  const fgTrend = fg.trend ? ` | 7일 추세: ${fg.trend} ${fg.trendDir}` : '';
 
   return `오늘 날짜: ${today} (토요일 — 미국 주식시장 휴장)
 
 [이번 주 주간 등락 결산]
-주요 지수: SPY ${fw('SPY')} / QQQ ${fw('QQQ')} / IWM ${fw('IWM')} / DIA ${fw('DIA')}
-변동성: VIX 주간 ${fw('^VIX')} | 공포탐욕지수 현재 ${fg.value} (${fg.value_classification})
-매크로: 달러(DXY) 주간 ${fw('DX-Y.NYB')} / 금 주간 ${fw('GC=F')} / 10Y금리 주간 ${fw('^TNX')}
+주요 지수: SPY ${fw('SPY')}${fLevel('SPY')} / QQQ ${fw('QQQ')}${fLevel('QQQ')} / IWM ${fw('IWM')} / DIA ${fw('DIA')}
+변동성: VIX 주간 ${fw('^VIX')} | 공포탐욕지수 현재 ${fg.value} (${fg.value_classification})${fgTrend}
+채권 주간: HYG ${fw('HYG')} / JNK ${fw('JNK')} / TLT ${fw('TLT')}
+수익률 커브 주간: ${ycWeeklyNote}
+매크로 주간: 달러(DXY) ${fw('DX-Y.NYB')} / 금 ${fw('GC=F')} / 오일(WTI) ${fw('CL=F')} / 10Y금리 ${fw('^TNX')}
 크립토(주말 실시간): BTC ${f('BTC-USD')} (주간 ${fw('BTC-USD')}) / ETH ${f('ETH-USD')} (주간 ${fw('ETH-USD')})
-주요 종목 주간: TSLA ${fw('TSLA')} / NVDA ${fw('NVDA')}
+주요 종목 주간: TSLA ${fw('TSLA')}${fLevel('TSLA')} / NVDA ${fw('NVDA')}${fLevel('NVDA')} / AAPL ${fw('AAPL')}${fLevel('AAPL')} / MSFT ${fw('MSFT')}${fLevel('MSFT')} / META ${fw('META')}
 섹터 주간 등락:
 ${sectorWeekly}
 ${newsSection}
+${nextWeekSection}
+${earningsSection}
 ${prevSection}
 
 위 데이터를 바탕으로 토요일 주간 결산 브리핑을 작성해주세요.
@@ -284,18 +382,24 @@ ${prevSection}
   첫째 줄: "[카지노 마켓] ${today} 주간 결산"
   둘째 줄: "[요약] " + 이번 주 장의 핵심을 구어체로 40자 이내 한 문장
   셋째 줄부터 본문 시작
-- 이번 주 전체 흐름과 핵심 테마 정리 — 한 주를 관통한 내러티브가 무엇이었는지
-- 주간 섹터 로테이션 심층 분석 — 어디로 자금이 몰렸고 어디서 빠졌는지, 그 이유
-- BTC/ETH 주말 실시간 동향 — 주식시장 휴장 중 크립토 고유 움직임, 나스닥과 디커플링 여부
-- 이번 주 가장 인상적이었던 종목/지표 1-2개 집중 분석
-- 강세/약세 시나리오 2가지 간략히 제시
+- 이번 주 전체 흐름과 핵심 테마 정리 — 한 주를 관통한 내러티브
+- 주간 섹터 로테이션 심층 분석 — 자금이 어디로 몰렸고 왜 그런지
+- 채권(HYG/JNK/TLT) 주간 변화 → 크레딧 시장이 리스크를 어떻게 평가하는지
+- 수익률 커브 주간 변화 → 금리 기대가 어느 방향으로 이동했는지
+- BTC/ETH 주말 실시간 동향 — 주식 대비 디커플링/커플링 여부
+- 200MA 대비 SPY/QQQ 현재 위치 → 이번 주 주요 MA 돌파/이탈 여부 해석
+- TSLA, NVDA 주간 성과 + 현재 기술적 레벨 의미
+- [강세 시나리오] 다음 주 이어질 조건 + 목표 레벨
+- [약세 시나리오] 반전 조건 + 지지 레벨
+- [다음 주 주목 이벤트] 경제 지표 + 어닝 일정 → "어떤 수치가 나오면 어떻게 반응할지" 구체적으로
+- [투자 액션 제안] 이번 주 흐름 바탕으로 다음 주 포지션 전략 한 줄 (관망/비중 유지/분할매수 타이밍 등)
 - 마지막: 주말 투자 마인드셋 한 마디
-- 길이: 1200~1600자
+- 길이: 1400~1800자
 - 구어체 한국어 + 영어 금융 용어 혼용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
 
-function buildSundayPrompt(quotes, weekly, fg, today, news, nextWeekCalendar, prevBrief) {
+function buildSundayPrompt(quotes, weekly, fg, today, news, nextWeekCalendar, prevBrief, earnings) {
   const fw = (sym) => {
     const w = weekly[sym];
     if (w == null) return 'N/A';
@@ -310,10 +414,35 @@ function buildSundayPrompt(quotes, weekly, fg, today, news, nextWeekCalendar, pr
     return `${q.price?.toFixed(decimals)} (${sign}${q.changePct?.toFixed(2)}%)`;
   };
 
+  const fLevel = (sym) => {
+    const q = quotes[sym];
+    if (!q || !q.twoHundredDayAverage) return '';
+    const ma200 = q.twoHundredDayAverage;
+    const pct200 = ((q.price - ma200) / ma200 * 100).toFixed(1);
+    const pct52h = q.fiftyTwoWeekHigh ? ((q.price - q.fiftyTwoWeekHigh) / q.fiftyTwoWeekHigh * 100).toFixed(1) : null;
+    const h52str = pct52h ? ` | 52주고점대비 ${pct52h}%` : '';
+    return ` [200MA ${ma200.toFixed(2)} (${pct200 >= 0 ? '+' : ''}${pct200}%)${h52str}]`;
+  };
+
+  const yc10 = quotes['^TNX']?.price;
+  const yc3m = quotes['^IRX']?.price;
+  const ycSpread = (yc10 && yc3m) ? (yc10 - yc3m).toFixed(3) : 'N/A';
+  const ycLabel = ycSpread !== 'N/A' ? (parseFloat(ycSpread) < 0 ? ' [역전 중!]' : '') : '';
+
+  const sectorWeekly = Object.keys(SECTOR_LABELS).map(sym => {
+    const w = weekly[sym];
+    const sign = (w ?? 0) >= 0 ? '+' : '';
+    return `  ${SECTOR_LABELS[sym]}: ${w != null ? sign + w.toFixed(2) + '%' : 'N/A'}`;
+  }).join('\n');
+
   const calendarSection = nextWeekCalendar.length > 0
     ? `\n[다음 주 주요 경제 이벤트 (USD)]\n${nextWeekCalendar.map(e =>
         `  ${e.date} ${e.time} - ${e.title}${e.forecast ? ` | 예측: ${e.forecast}, 이전: ${e.previous}` : ''}`
       ).join('\n')}`
+    : '';
+
+  const earningsSection = earnings?.length > 0
+    ? `\n[다음 주 주요 어닝 일정]\n  ${earnings.join(', ')}`
     : '';
 
   const newsSection = news.length > 0
@@ -321,17 +450,25 @@ function buildSundayPrompt(quotes, weekly, fg, today, news, nextWeekCalendar, pr
     : '';
 
   const prevSection = prevBrief
-    ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 600)}`
+    ? `\n[지난 브리핑 (연속성 참고용)]\n${prevBrief.slice(0, 1000)}`
     : '';
+
+  const fgTrend = fg.trend ? ` | 7일 추세: ${fg.trend} ${fg.trendDir}` : '';
 
   return `오늘 날짜: ${today} (일요일 — 내일 월요일 장 시작 전날)
 
-[현재 시장 상태 (이번 주 주간 등락 참고)]
-주요 지수 주간: SPY ${fw('SPY')} / QQQ ${fw('QQQ')} / IWM ${fw('IWM')}
-공포탐욕지수: ${fg.value} (${fg.value_classification})
+[현재 시장 상태]
+주요 지수 주간: SPY ${fw('SPY')}${fLevel('SPY')} / QQQ ${fw('QQQ')}${fLevel('QQQ')} / IWM ${fw('IWM')}
+공포탐욕지수: ${fg.value} (${fg.value_classification})${fgTrend}
+채권 주간: HYG ${fw('HYG')} / JNK ${fw('JNK')} / TLT ${fw('TLT')}
+수익률 커브: 3M ${quotes['^IRX']?.price?.toFixed(3) || 'N/A'}% / 10Y ${quotes['^TNX']?.price?.toFixed(3) || 'N/A'}% | 3M-10Y 스프레드: ${ycSpread}%${ycLabel}
+매크로 주간: 달러(DXY) ${fw('DX-Y.NYB')} / 금 ${fw('GC=F')} / 오일(WTI) ${fw('CL=F')} / 10Y금리 ${fw('^TNX')}
 크립토 실시간: BTC ${f('BTC-USD')} (주간 ${fw('BTC-USD')}) / ETH ${f('ETH-USD')} (주간 ${fw('ETH-USD')})
-매크로 참고: 달러(DXY) 주간 ${fw('DX-Y.NYB')} / 금 주간 ${fw('GC=F')} / 10Y금리 주간 ${fw('^TNX')}
+주요 종목 주간: TSLA ${fw('TSLA')}${fLevel('TSLA')} / NVDA ${fw('NVDA')}${fLevel('NVDA')} / AAPL ${fw('AAPL')}${fLevel('AAPL')} / MSFT ${fw('MSFT')}${fLevel('MSFT')}
+섹터 주간 등락:
+${sectorWeekly}
 ${calendarSection}
+${earningsSection}
 ${newsSection}
 ${prevSection}
 
@@ -342,13 +479,18 @@ ${prevSection}
   첫째 줄: "[카지노 마켓] ${today} 다음 주 프리뷰"
   둘째 줄: "[요약] " + 다음 주 핵심 포인트를 구어체로 40자 이내 한 문장
   셋째 줄부터 본문 시작
-- 다음 주 주요 경제 이벤트 각각의 시장 영향 전망 (FOMC, CPI, 고용지표 등 있으면 심층 분석)
-- 이번 주 흐름을 바탕으로 월요일 갭업/갭다운 가능성 시나리오
-- BTC/ETH 일요일 실시간 동향 — 주말 이틀간의 변화, 월요일 크립토 방향성
-- 다음 주 주목해야 할 섹터/종목 2-3개
-- 강세/약세 시나리오 2가지
-- 마지막: 월요일 장 전 마인드셋 한 마디 ("준비된 자만이 기회를 잡는다" 류)
-- 길이: 1200~1600자
+- 이번 주 흐름 요약 → 다음 주로 이어지는 맥락 제공
+- 다음 주 주요 경제 이벤트 각각의 시장 영향 전망 — "예측치보다 높으면/낮으면 어떻게 반응할지" 구체적으로
+- 200MA, 50MA 대비 SPY/QQQ 현재 위치 → 월요일 갭업/갭다운 시 어느 레벨이 의미 있는지
+- 채권(HYG/JNK) 주간 변화 → 다음 주 리스크 온/오프 방향성 예측
+- BTC/ETH 일요일 실시간 동향 + 월요일 크립토 방향성 전망
+- 섹터 로테이션 주간 데이터 기반 → 다음 주 어느 섹터가 유리할지
+- [강세 시나리오] 월요일 갭업 조건 + 다음 주 목표 레벨
+- [약세 시나리오] 월요일 갭다운 조건 + 핵심 지지 레벨 (여기 깨지면 어디까지)
+- [다음 주 어닝] 실적 발표 예정 종목 → 포지션 관리 방법 구체적으로 (실적 전 매도/홀딩/진입 타이밍)
+- [투자 액션 제안] 월요일 장 시작 전 체크리스트 형식으로 — 확인할 지표, 진입/관망 조건 명시
+- 마지막: 월요일 장 전 마인드셋 한 마디
+- 길이: 1400~1800자
 - 구어체 한국어 + 영어 금융 용어 혼용
 - 마크다운 문법(**, ##, -, * 등) 절대 사용 금지. 순수 텍스트로만 작성`;
 }
@@ -367,15 +509,16 @@ app.get('/api/brief', async (req, res) => {
   }
 
   try {
-    const [quotes, fearGreed, news, calendar] = await Promise.all([
+    const [quotes, fearGreed, news, calendar, earnings] = await Promise.all([
       fetchQuotes(),
       fetchFearGreed(),
       fetchNews(),
       fetchEconomicCalendar(),
+      fetchEarningsNextWeek(),
     ]);
 
     const prevBrief = dailyCache.date !== today ? dailyCache.brief : dailyCache.prevBrief;
-    const prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief);
+    const prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief, earnings);
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -682,16 +825,20 @@ async function postDailyTweet(dayType = 'weekday') {
 
       let prompt;
       if (dayType === 'saturday') {
-        const weekly = await fetchWeeklyChanges();
-        prompt = buildSaturdayPrompt(quotes, weekly, fearGreed, today, news, prevBrief);
-      } else if (dayType === 'sunday') {
-        const [weekly, nextWeekCalendar] = await Promise.all([
-          fetchWeeklyChanges(), fetchNextWeekCalendar(),
+        const [weekly, nextWeekCalendar, earnings] = await Promise.all([
+          fetchWeeklyChanges(), fetchNextWeekCalendar(), fetchEarningsNextWeek(),
         ]);
-        prompt = buildSundayPrompt(quotes, weekly, fearGreed, today, news, nextWeekCalendar, prevBrief);
+        prompt = buildSaturdayPrompt(quotes, weekly, fearGreed, today, news, prevBrief, nextWeekCalendar, earnings);
+      } else if (dayType === 'sunday') {
+        const [weekly, nextWeekCalendar, earnings] = await Promise.all([
+          fetchWeeklyChanges(), fetchNextWeekCalendar(), fetchEarningsNextWeek(),
+        ]);
+        prompt = buildSundayPrompt(quotes, weekly, fearGreed, today, news, nextWeekCalendar, prevBrief, earnings);
       } else {
-        const calendar = await fetchEconomicCalendar();
-        prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief);
+        const [calendar, earnings] = await Promise.all([
+          fetchEconomicCalendar(), fetchEarningsNextWeek(),
+        ]);
+        prompt = buildPrompt(quotes, fearGreed, today, news, calendar, prevBrief, earnings);
       }
 
       const msg = await anthropic.messages.create({
