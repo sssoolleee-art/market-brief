@@ -38,13 +38,17 @@ const SECTOR_LABELS = {
 
 const SYSTEM_PROMPT = `당신은 월스트리트 10년 경력의 퀀트 트레이더 겸 매크로 분석가입니다. 헤지펀드에서 일하다 독립해 개인 투자자들을 위한 날카로운 시장 분석을 제공하고 있습니다. 당신의 분석은 단순한 수치 해설이 아닌, 시장 참여자들의 심리, 자금 흐름, 그리고 숨겨진 패턴을 읽어내는 것으로 유명합니다. 항상 데이터에 기반하되, 그 이면의 "왜?"를 파고드는 스타일로 분석합니다. 한국 개인 투자자들이 쉽게 이해할 수 있도록 구어체로 풀어쓰되, 전문성을 잃지 않습니다.`;
 
+const MA_SYMBOLS = new Set(['SPY', 'QQQ', 'IWM', 'TSLA', 'NVDA', 'AAPL', 'MSFT', 'META']);
+
 async function fetchOneQuote(symbol) {
   const encoded = encodeURIComponent(symbol);
+  const range = MA_SYMBOLS.has(symbol) ? '250d' : '2d';
   const { data } = await axios.get(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encoded}?interval=1d&range=2d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encoded}?interval=1d&range=${range}`,
     { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' } }
   );
-  const meta = data.chart.result[0].meta;
+  const result = data.chart.result[0];
+  const meta = result.meta;
   const price = meta.regularMarketPrice;
   const prev = meta.chartPreviousClose || meta.previousClose;
   const changePct = prev ? ((price - prev) / prev) * 100 : 0;
@@ -53,8 +57,12 @@ async function fetchOneQuote(symbol) {
   const volRatio = (volume && avgVolume) ? volume / avgVolume : null;
   const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh || null;
   const fiftyTwoWeekLow = meta.fiftyTwoWeekLow || null;
-  const fiftyDayAverage = meta.fiftyDayAverage || null;
-  const twoHundredDayAverage = meta.twoHundredDayAverage || null;
+  let fiftyDayAverage = null, twoHundredDayAverage = null;
+  if (MA_SYMBOLS.has(symbol)) {
+    const closes = result.indicators?.quote?.[0]?.close?.filter(v => v != null) || [];
+    if (closes.length >= 50) fiftyDayAverage = closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
+    if (closes.length >= 200) twoHundredDayAverage = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
+  }
   return { price, changePct, change: price - (prev || price), volume, avgVolume, volRatio, fiftyTwoWeekHigh, fiftyTwoWeekLow, fiftyDayAverage, twoHundredDayAverage };
 }
 
