@@ -533,7 +533,7 @@ app.get('/api/brief', async (req, res) => {
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
+      max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -763,7 +763,7 @@ async function generateEnglishImage(brief, dayType) {
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{
         role: 'user',
         content: `Translate and adapt the following Korean stock market briefing into English. Keep the same structure and length: start with the title line "${header}", then a one-line summary starting with "[Summary] ", then the full analysis in plain text (no markdown). Target 1200-1600 characters.\n\n${brief}`,
@@ -854,7 +854,7 @@ async function postDailyTweet(dayType = 'weekday') {
 
       const msg = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
+        max_tokens: 4096,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: prompt }],
       });
