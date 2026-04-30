@@ -935,11 +935,16 @@ async function postDailyTweet(dayType = 'weekday') {
     const tweetLabel = { weekday: '미장 마감', saturday: '주간 결산', sunday: '다음 주 프리뷰' }[dayType] || '미장 마감';
 
     const HASHTAGS = {
-      weekday:  '#미국주식 #서학개미 #미장마감 #나스닥 #SP500 #비트코인 #재테크\n#stocks #StockMarket #investing #trading #crypto #Bitcoin #MarketClose',
-      saturday: '#미국주식 #서학개미 #주간결산 #나스닥 #SP500 #비트코인 #재테크\n#stocks #StockMarket #investing #WeekInReview #crypto #Bitcoin #finance',
-      sunday:   '#미국주식 #서학개미 #주간프리뷰 #나스닥 #SP500 #비트코인 #재테크\n#stocks #StockMarket #investing #WeekAhead #crypto #Bitcoin #MarketOutlook',
+      weekday:  '#서학개미 #미국주식',
+      saturday: '#서학개미 #주간결산',
+      sunday:   '#서학개미 #미국주식',
     };
-    const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n"${summary}"\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
+    const CTA = {
+      weekday:  '오늘 어떻게 대응했어요? 👇',
+      saturday: '이번 주 어땠어요? 👇',
+      sunday:   '다음 주 전략 어떻게 잡으세요? 👇',
+    };
+    const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n${summary}\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n${CTA[dayType] || CTA.weekday}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
