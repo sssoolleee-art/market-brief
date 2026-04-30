@@ -50,8 +50,10 @@ async function fetchOneQuote(symbol) {
   const result = data.chart.result[0];
   const meta = result.meta;
   const price = meta.regularMarketPrice;
-  const prev = meta.chartPreviousClose || meta.previousClose;
-  const changePct = prev ? ((price - prev) / prev) * 100 : 0;
+  const changePct = meta.regularMarketChangePercent ?? (() => {
+    const prev = meta.chartPreviousClose || meta.previousClose;
+    return prev ? ((price - prev) / prev) * 100 : 0;
+  })();
   const volume = meta.regularMarketVolume || null;
   const avgVolume = meta.averageDailyVolume3Month || null;
   const volRatio = (volume && avgVolume) ? volume / avgVolume : null;
@@ -286,7 +288,7 @@ ${prevSection}
 [스타일 가이드]
 - 반드시 아래 두 줄로 시작할 것:
   첫째 줄: "[카지노 마켓] ${today} 미장 마감 브리핑"
-  둘째 줄: "[요약] " + 오늘 장의 핵심을 구어체로 40자 이내 한 문장 (예: "FOMC 충격 후폭풍, VIX +12% 공포 확산")
+  둘째 줄: "[요약] " + 오늘 장을 직접 투자하며 겪은 사람의 시각으로, 감정과 맥락이 담긴 구어체 40자 이내 한 문장. 뉴스 헤드라인이 아닌 투자자의 속마음처럼 (예: "오늘도 연준이 패닉 버튼 눌렀다, 버티는 게 맞나 고민됨", "나스닥 반등인데 믿어야 할지 모르겠음", "VIX 급등에 손 떨렸는데 결국 회복함")
   셋째 줄부터 본문 시작
 - 말투: 반드시 친한 친구에게 설명하듯 ~야, ~거야, ~거임, ~보임, ~셈임, ~함, ~잖아 등 캐주얼 종결어미 사용. ~입니다/~합니다/~거예요/~습니다 절대 금지
 - 구어체 한국어 + 영어 금융 용어 자연스럽게 혼용 (레버설, 컨펌, 다이버전스, 숏스퀴즈, 캐피툴레이션, 풀백, 리테스트 등)
@@ -389,7 +391,7 @@ ${prevSection}
 [스타일 가이드]
 - 반드시 아래 두 줄로 시작할 것:
   첫째 줄: "[카지노 마켓] ${today} 주간 결산"
-  둘째 줄: "[요약] " + 이번 주 장의 핵심을 구어체로 40자 이내 한 문장
+  둘째 줄: "[요약] " + 이번 주를 직접 버텨낸 투자자의 시각으로, 감정과 맥락이 담긴 구어체 40자 이내 한 문장. 뉴스 헤드라인이 아닌 투자자의 속마음처럼 (예: "이번 주 진짜 멘탈 갈렸는데 결국 버텼음", "연준에 두 번 흔들렸는데 포지션은 지킴")
   셋째 줄부터 본문 시작
 - 이번 주 전체 흐름과 핵심 테마 정리 — 한 주를 관통한 내러티브
 - 주간 섹터 로테이션 심층 분석 — 자금이 어디로 몰렸고 왜 그런지
@@ -487,7 +489,7 @@ ${prevSection}
 [스타일 가이드]
 - 반드시 아래 두 줄로 시작할 것:
   첫째 줄: "[카지노 마켓] ${today} 다음 주 프리뷰"
-  둘째 줄: "[요약] " + 다음 주 핵심 포인트를 구어체로 40자 이내 한 문장
+  둘째 줄: "[요약] " + 다음 주를 앞둔 투자자의 시각으로, 기대와 불안이 담긴 구어체 40자 이내 한 문장. 뉴스 헤드라인이 아닌 투자자의 속마음처럼 (예: "다음 주 FOMC 전까지는 관망이 맞는 것 같음", "이번 주 버텼으니 다음 주도 버텨볼 생각")
   셋째 줄부터 본문 시작
 - 이번 주 흐름 요약 → 다음 주로 이어지는 맥락 제공
 - 다음 주 주요 경제 이벤트 각각의 시장 영향 전망 — "예측치보다 높으면/낮으면 어떻게 반응할지" 구체적으로
@@ -940,11 +942,30 @@ async function postDailyTweet(dayType = 'weekday') {
       saturday: '#서학개미 #주간결산',
       sunday:   '#서학개미 #미국주식',
     };
-    const CTA = {
-      weekday:  '오늘 어떻게 대응했어요? 👇',
-      saturday: '이번 주 어땠어요? 👇',
-      sunday:   '다음 주 전략 어떻게 잡으세요? 👇',
+    const CTA_POOL = {
+      weekday: [
+        '오늘 어떻게 대응했어요? 👇',
+        '버텼어요, 팔았어요? 👇',
+        '오늘 장 어떻게 봤어요? 👇',
+        '멘탈 괜찮으세요? 👇',
+        '오늘 수익/손실 어땠어요? 👇',
+        '같은 생각이에요? 👇',
+      ],
+      saturday: [
+        '이번 주 어땠어요? 👇',
+        '이번 주 수익/손실 어땠어요? 👇',
+        '이번 주 버텼나요? 👇',
+        '한 주 마무리 어떻게 됐어요? 👇',
+      ],
+      sunday: [
+        '다음 주 전략 어떻게 잡으세요? 👇',
+        '다음 주 어떻게 준비하세요? 👇',
+        '다음 주 포지션 유지예요, 변경예요? 👇',
+        '다음 주 기대예요, 겁나요? 👇',
+      ],
     };
+    const ctaPool = CTA_POOL[dayType] || CTA_POOL.weekday;
+    const CTA = { [dayType]: ctaPool[Math.floor(Math.random() * ctaPool.length)] };
     const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n${summary}\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n${CTA[dayType] || CTA.weekday}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
