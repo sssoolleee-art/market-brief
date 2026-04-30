@@ -876,8 +876,9 @@ async function postDailyTweet(dayType = 'weekday') {
     const spy = quotes?.['SPY'];
     const vix = quotes?.['^VIX'];
     const qqq = quotes?.['QQQ'];
-    const spyStr = spy ? `SPY ${spy.changePct >= 0 ? '+' : ''}${spy.changePct.toFixed(2)}%` : '';
-    const qqqStr = qqq ? `QQQ ${qqq.changePct >= 0 ? '+' : ''}${qqq.changePct.toFixed(2)}%` : '';
+    const validPct = (pct) => typeof pct === 'number' && isFinite(pct) && Math.abs(pct) <= 20;
+    const spyStr = spy && validPct(spy.changePct) ? `SPY ${spy.changePct >= 0 ? '+' : ''}${spy.changePct.toFixed(2)}%` : '';
+    const qqqStr = qqq && validPct(qqq.changePct) ? `QQQ ${qqq.changePct >= 0 ? '+' : ''}${qqq.changePct.toFixed(2)}%` : '';
     const vixStr = vix ? `VIX ${vix.price.toFixed(1)}` : '';
 
     // 이미지 1: 지표 차트, 이미지 2: 브리핑 텍스트
