@@ -878,10 +878,7 @@ async function postDailyTweet(dayType = 'weekday') {
     const spy = quotes?.['SPY'];
     const vix = quotes?.['^VIX'];
     const qqq = quotes?.['QQQ'];
-    const validPct = (pct) => typeof pct === 'number' && isFinite(pct) && Math.abs(pct) <= 20;
-    const spyStr = spy && validPct(spy.changePct) ? `SPY ${spy.changePct >= 0 ? '+' : ''}${spy.changePct.toFixed(2)}%` : '';
-    const qqqStr = qqq && validPct(qqq.changePct) ? `QQQ ${qqq.changePct >= 0 ? '+' : ''}${qqq.changePct.toFixed(2)}%` : '';
-    const vixStr = vix ? `VIX ${vix.price.toFixed(1)}` : '';
+
 
     // 이미지 1: 지표 차트, 이미지 2: 브리핑 텍스트
     const mediaIds = [];
@@ -966,7 +963,7 @@ async function postDailyTweet(dayType = 'weekday') {
     };
     const ctaPool = CTA_POOL[dayType] || CTA_POOL.weekday;
     const CTA = { [dayType]: ctaPool[Math.floor(Math.random() * ctaPool.length)] };
-    const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n${summary}\n\n${spyStr} | ${qqqStr} | ${vixStr}\n\n${CTA[dayType] || CTA.weekday}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
+    const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n${summary}\n\n${CTA[dayType] || CTA.weekday}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
