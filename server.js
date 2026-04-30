@@ -963,7 +963,7 @@ async function postDailyTweet(dayType = 'weekday') {
     };
     const ctaPool = CTA_POOL[dayType] || CTA_POOL.weekday;
     const CTA = { [dayType]: ctaPool[Math.floor(Math.random() * ctaPool.length)] };
-    const tweetText = `카지노마켓 ${dateStr} ${tweetLabel}\n\n${summary}\n\n${CTA[dayType] || CTA.weekday}\n\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
+    const tweetText = `${summary}\n\n${CTA[dayType] || CTA.weekday}\n\n— 카지노마켓 ${dateStr} ${tweetLabel}\n${HASHTAGS[dayType] || HASHTAGS.weekday}`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
