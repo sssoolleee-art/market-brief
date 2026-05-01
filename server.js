@@ -40,32 +40,43 @@ const SYSTEM_PROMPT = `당신은 월스트리트 10년 경력의 퀀트 트레�
 
 const MA_SYMBOLS = new Set(['SPY', 'QQQ', 'IWM', 'TSLA', 'NVDA', 'AAPL', 'MSFT', 'META']);
 
+// Finnhub 심볼 매핑 (Yahoo Finance → Finnhub)
+const FINNHUB_MAP = {
+  'SPY': 'SPY', 'QQQ': 'QQQ', 'IWM': 'IWM', 'DIA': 'DIA',
+  '^VIX': 'VIX', '^IRX': 'IRX', '^FVX': 'FVX', '^TNX': 'TNX',
+  'HYG': 'HYG', 'JNK': 'JNK', 'TLT': 'TLT',
+  'DX-Y.NYB': 'DX-Y.NYB', 'GC=F': 'GC1!', 'CL=F': 'CL1!',
+  'BTC-USD': 'BINANCE:BTCUSDT', 'ETH-USD': 'BINANCE:ETHUSDT',
+  'TSLA': 'TSLA', 'NVDA': 'NVDA', 'AAPL': 'AAPL',
+  'MSFT': 'MSFT', 'AMZN': 'AMZN', 'GOOGL': 'GOOGL', 'META': 'META',
+  'XLK': 'XLK', 'XLF': 'XLF', 'XLE': 'XLE', 'XLV': 'XLV',
+  'XLI': 'XLI', 'XLY': 'XLY', 'XLP': 'XLP', 'XLU': 'XLU',
+  'XLRE': 'XLRE', 'XLB': 'XLB', 'XLC': 'XLC',
+};
+
+const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
+
 async function fetchOneQuote(symbol) {
-  const encoded = encodeURIComponent(symbol);
-  const range = MA_SYMBOLS.has(symbol) ? '250d' : '2d';
-  const { data } = await axios.get(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encoded}?interval=1d&range=${range}`,
-    { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept': 'application/json', 'Accept-Language': 'en-US,en;q=0.9' } }
-  );
-  const result = data.chart.result[0];
-  const meta = result.meta;
-  const price = meta.regularMarketPrice;
-  const changePct = meta.regularMarketChangePercent ?? (() => {
-    const prev = meta.chartPreviousClose || meta.previousClose;
-    return prev ? ((price - prev) / prev) * 100 : 0;
-  })();
-  const volume = meta.regularMarketVolume || null;
-  const avgVolume = meta.averageDailyVolume3Month || null;
-  const volRatio = (volume && avgVolume) ? volume / avgVolume : null;
-  const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh || null;
-  const fiftyTwoWeekLow = meta.fiftyTwoWeekLow || null;
-  let fiftyDayAverage = null, twoHundredDayAverage = null;
-  if (MA_SYMBOLS.has(symbol)) {
-    const closes = result.indicators?.quote?.[0]?.close?.filter(v => v != null) || [];
-    if (closes.length >= 50) fiftyDayAverage = closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
-    if (closes.length >= 200) twoHundredDayAverage = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
-  }
-  return { price, changePct, change: price - (prev || price), volume, avgVolume, volRatio, fiftyTwoWeekHigh, fiftyTwoWeekLow, fiftyDayAverage, twoHundredDayAverage };
+  if (!FINNHUB_API_KEY) throw new Error('FINNHUB_API_KEY not set');
+  const fSym = FINNHUB_MAP[symbol];
+  if (!fSym) throw new Error(`No finnhub mapping for ${symbol}`);
+
+  const { data } = await axios.get('https://finnhub.io/api/v1/quote', {
+    params: { symbol: fSym, token: FINNHUB_API_KEY },
+    timeout: 10000,
+  });
+
+  // Finnhub: { c: current, d: change, dp: changePercent, h: high, l: low, o: open, pc: previousClose }
+  if (!data.c || data.c === 0) throw new Error(`No data for ${symbol}`);
+
+  return {
+    price: data.c,
+    changePct: data.dp,
+    change: data.d,
+    volume: null, avgVolume: null, volRatio: null,
+    fiftyTwoWeekHigh: null, fiftyTwoWeekLow: null,
+    fiftyDayAverage: null, twoHundredDayAverage: null,
+  };
 }
 
 async function fetchQuotes() {
