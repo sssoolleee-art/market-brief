@@ -886,24 +886,9 @@ async function postDailyTweet(dayType = 'weekday') {
     const qqq = quotes?.['QQQ'];
 
 
-    // 이미지 1: 지표 차트, 이미지 2: 브리핑 텍스트
+    // 이미지: 한글 브리핑 + 영어 브리핑 2장 고정
     const mediaIds = [];
     try {
-      // 차트 이미지 제거 — 브리핑 텍스트에 지표 포함됨
-
-      // 2. Finviz S&P500 히트맵
-      try {
-        console.log('Finviz 히트맵 가져오는 중...');
-        const heatmapRes = await axios.get(
-          'https://finviz.com/map.ashx?t=sec&p=d',
-          { responseType: 'arraybuffer', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Referer': 'https://finviz.com/' }, timeout: 10000 }
-        );
-        const heatmapId = await twitterClient.v1.uploadMedia(Buffer.from(heatmapRes.data), { mimeType: 'image/png' });
-        mediaIds.push(heatmapId);
-        console.log('히트맵 완료');
-      } catch (hmErr) {
-        console.error('히트맵 실패:', hmErr.message);
-      }
 
       // 3. 브리핑 텍스트 (한글) — [요약X] 줄 제거 후 이미지 생성 (트윗 텍스트와 중복 방지)
       console.log('텍스트 이미지 생성 중...');
