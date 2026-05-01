@@ -883,12 +883,16 @@ async function postDailyTweet(dayType = 'weekday') {
     // 이미지 1: 지표 차트, 이미지 2: 브리핑 텍스트
     const mediaIds = [];
     try {
-      // 1. 지표 차트
-      console.log('차트 이미지 생성 중...');
-      const chartBuf = generateMarketImage(quotes, dailyCache.fearGreed);
-      const chartId = await twitterClient.v1.uploadMedia(chartBuf, { mimeType: 'image/png' });
-      mediaIds.push(chartId);
-      console.log('차트 이미지 완료');
+      // 1. 지표 차트 (quotes 데이터 있을 때만)
+      if (quotes && Object.keys(quotes).length > 0) {
+        console.log('차트 이미지 생성 중...');
+        const chartBuf = generateMarketImage(quotes, dailyCache.fearGreed);
+        const chartId = await twitterClient.v1.uploadMedia(chartBuf, { mimeType: 'image/png' });
+        mediaIds.push(chartId);
+        console.log('차트 이미지 완료');
+      } else {
+        console.log('차트 스킵: quotes 데이터 없음');
+      }
 
       // 2. Finviz S&P500 히트맵
       try {
@@ -941,24 +945,24 @@ async function postDailyTweet(dayType = 'weekday') {
     };
     const CTA_POOL = {
       weekday: [
-        '오늘 어떻게 대응했어요? 👇',
-        '버텼어요, 팔았어요? 👇',
-        '오늘 장 어떻게 봤어요? 👇',
-        '멘탈 괜찮으세요? 👇',
-        '오늘 수익/손실 어땠어요? 👇',
-        '같은 생각이에요? 👇',
+        '오늘 어떻게 대응했어? 👇',
+        '버텼어, 팔았어? 👇',
+        '오늘 장 어떻게 봤어? 👇',
+        '멘탈 괜찮아? 👇',
+        '오늘 수익/손실 어땠어? 👇',
+        '같은 생각이야? 👇',
       ],
       saturday: [
-        '이번 주 어땠어요? 👇',
-        '이번 주 수익/손실 어땠어요? 👇',
-        '이번 주 버텼나요? 👇',
-        '한 주 마무리 어떻게 됐어요? 👇',
+        '이번 주 어땠어? 👇',
+        '이번 주 수익/손실 어땠어? 👇',
+        '이번 주 버텼어? 👇',
+        '한 주 마무리 어떻게 됐어? 👇',
       ],
       sunday: [
-        '다음 주 전략 어떻게 잡으세요? 👇',
-        '다음 주 어떻게 준비하세요? 👇',
-        '다음 주 포지션 유지예요, 변경예요? 👇',
-        '다음 주 기대예요, 겁나요? 👇',
+        '다음 주 전략 어떻게 잡아? 👇',
+        '다음 주 어떻게 준비해? 👇',
+        '다음 주 포지션 유지야, 변경이야? 👇',
+        '다음 주 기대돼, 겁나? 👇',
       ],
     };
     const ctaPool = CTA_POOL[dayType] || CTA_POOL.weekday;
