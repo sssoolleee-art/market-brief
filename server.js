@@ -40,43 +40,30 @@ const SYSTEM_PROMPT = `당신은 월스트리트 10년 경력의 퀀트 트레�
 
 const MA_SYMBOLS = new Set(['SPY', 'QQQ', 'IWM', 'TSLA', 'NVDA', 'AAPL', 'MSFT', 'META']);
 
-// Finnhub 심볼 매핑 (Yahoo Finance → Finnhub)
-const FINNHUB_MAP = {
-  'SPY': 'SPY', 'QQQ': 'QQQ', 'IWM': 'IWM', 'DIA': 'DIA',
-  '^VIX': 'VIX', '^IRX': 'IRX', '^FVX': 'FVX', '^TNX': 'TNX',
-  'HYG': 'HYG', 'JNK': 'JNK', 'TLT': 'TLT',
-  'DX-Y.NYB': 'DX-Y.NYB', 'GC=F': 'GC1!', 'CL=F': 'CL1!',
-  'BTC-USD': 'BINANCE:BTCUSDT', 'ETH-USD': 'BINANCE:ETHUSDT',
-  'TSLA': 'TSLA', 'NVDA': 'NVDA', 'AAPL': 'AAPL',
-  'MSFT': 'MSFT', 'AMZN': 'AMZN', 'GOOGL': 'GOOGL', 'META': 'META',
-  'XLK': 'XLK', 'XLF': 'XLF', 'XLE': 'XLE', 'XLV': 'XLV',
-  'XLI': 'XLI', 'XLY': 'XLY', 'XLP': 'XLP', 'XLU': 'XLU',
-  'XLRE': 'XLRE', 'XLB': 'XLB', 'XLC': 'XLC',
-};
-
-const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
-
 async function fetchOneQuote(symbol) {
-  if (!FINNHUB_API_KEY) throw new Error('FINNHUB_API_KEY not set');
-  const fSym = FINNHUB_MAP[symbol];
-  if (!fSym) throw new Error(`No finnhub mapping for ${symbol}`);
-
-  const { data } = await axios.get('https://finnhub.io/api/v1/quote', {
-    params: { symbol: fSym, token: FINNHUB_API_KEY },
-    timeout: 10000,
-  });
-
-  // Finnhub: { c: current, d: change, dp: changePercent, h: high, l: low, o: open, pc: previousClose }
-  if (!data.c || data.c === 0) throw new Error(`No data for ${symbol}`);
-
-  return {
-    price: data.c,
-    changePct: data.dp,
-    change: data.d,
-    volume: null, avgVolume: null, volRatio: null,
-    fiftyTwoWeekHigh: null, fiftyTwoWeekLow: null,
-    fiftyDayAverage: null, twoHundredDayAverage: null,
-  };
+  const encoded = encodeURIComponent(symbol);
+  const range = MA_SYMBOLS.has(symbol) ? '250d' : '2d';
+  const { data } = await axios.get(
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encoded}?interval=1d&range=${range}`,
+    { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' } }
+  );
+  const result = data.chart.result[0];
+  const meta = result.meta;
+  const price = meta.regularMarketPrice;
+  const prev = meta.chartPreviousClose || meta.previousClose;
+  const changePct = prev ? ((price - prev) / prev) * 100 : 0;
+  const volume = meta.regularMarketVolume || null;
+  const avgVolume = meta.averageDailyVolume3Month || null;
+  const volRatio = (volume && avgVolume) ? volume / avgVolume : null;
+  const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh || null;
+  const fiftyTwoWeekLow = meta.fiftyTwoWeekLow || null;
+  let fiftyDayAverage = null, twoHundredDayAverage = null;
+  if (MA_SYMBOLS.has(symbol)) {
+    const closes = result.indicators?.quote?.[0]?.close?.filter(v => v != null) || [];
+    if (closes.length >= 50) fiftyDayAverage = closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
+    if (closes.length >= 200) twoHundredDayAverage = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
+  }
+  return { price, changePct, change: price - (prev || price), volume, avgVolume, volRatio, fiftyTwoWeekHigh, fiftyTwoWeekLow, fiftyDayAverage, twoHundredDayAverage };
 }
 
 async function fetchQuotes() {
@@ -894,16 +881,7 @@ async function postDailyTweet(dayType = 'weekday') {
     // 이미지 1: 지표 차트, 이미지 2: 브리핑 텍스트
     const mediaIds = [];
     try {
-      // 1. 지표 차트 (quotes 데이터 있을 때만)
-      if (quotes && Object.keys(quotes).length > 0) {
-        console.log('차트 이미지 생성 중...');
-        const chartBuf = generateMarketImage(quotes, dailyCache.fearGreed);
-        const chartId = await twitterClient.v1.uploadMedia(chartBuf, { mimeType: 'image/png' });
-        mediaIds.push(chartId);
-        console.log('차트 이미지 완료');
-      } else {
-        console.log('차트 스킵: quotes 데이터 없음');
-      }
+      // 차트 이미지 제거 — 브리핑 텍스트에 지표 포함됨
 
       // 2. Finviz S&P500 히트맵
       try {
