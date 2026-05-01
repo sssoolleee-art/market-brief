@@ -939,31 +939,7 @@ async function postDailyTweet(dayType = 'weekday') {
     const summary = [s1, s2, s3].filter(Boolean).join('\n');
     const tweetLabel = { weekday: '미장 마감', saturday: '주간 결산', sunday: '다음 주 프리뷰' }[dayType] || '미장 마감';
 
-    const CTA_POOL = {
-      weekday: [
-        '오늘 어떻게 대응했어? 👇',
-        '버텼어, 팔았어? 👇',
-        '오늘 장 어떻게 봤어? 👇',
-        '멘탈 괜찮아? 👇',
-        '오늘 수익/손실 어땠어? 👇',
-        '같은 생각이야? 👇',
-      ],
-      saturday: [
-        '이번 주 어땠어? 👇',
-        '이번 주 수익/손실 어땠어? 👇',
-        '이번 주 버텼어? 👇',
-        '한 주 마무리 어떻게 됐어? 👇',
-      ],
-      sunday: [
-        '다음 주 전략 어떻게 잡아? 👇',
-        '다음 주 어떻게 준비해? 👇',
-        '다음 주 포지션 유지야, 변경이야? 👇',
-        '다음 주 기대돼, 겁나? 👇',
-      ],
-    };
-    const ctaPool = CTA_POOL[dayType] || CTA_POOL.weekday;
-    const CTA = { [dayType]: ctaPool[Math.floor(Math.random() * ctaPool.length)] };
-    const tweetText = `${summary}\n\n${CTA[dayType] || CTA.weekday}\n\n— 카지노마켓 ${dateStr} ${tweetLabel}`;
+    const tweetText = summary;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
