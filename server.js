@@ -903,9 +903,10 @@ async function postDailyTweet(dayType = 'weekday') {
         console.error('히트맵 실패:', hmErr.message);
       }
 
-      // 3. 브리핑 텍스트 (한글)
+      // 3. 브리핑 텍스트 (한글) — [요약X] 줄 제거 후 이미지 생성 (트윗 텍스트와 중복 방지)
       console.log('텍스트 이미지 생성 중...');
-      const textBuf = generateTextImage(brief);
+      const briefForImage = brief.split('\n').filter(l => !l.trimStart().startsWith('[요약')).join('\n');
+      const textBuf = generateTextImage(briefForImage);
       const textId = await twitterClient.v1.uploadMedia(textBuf, { mimeType: 'image/png' });
       mediaIds.push(textId);
       console.log('텍스트 이미지 완료');
@@ -914,7 +915,7 @@ async function postDailyTweet(dayType = 'weekday') {
       if (mediaIds.length < 4) {
         try {
           console.log('영어 이미지 생성 중...');
-          const enBuf = await generateEnglishImage(brief, dayType);
+          const enBuf = await generateEnglishImage(briefForImage, dayType);
           const enId = await twitterClient.v1.uploadMedia(enBuf, { mimeType: 'image/png' });
           mediaIds.push(enId);
           console.log('영어 이미지 완료');
