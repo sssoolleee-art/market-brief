@@ -51,7 +51,9 @@ async function fetchOneQuote(symbol) {
   const meta = result.meta;
   const price = meta.regularMarketPrice;
   const prev = meta.chartPreviousClose || meta.previousClose;
-  const changePct = prev ? ((price - prev) / prev) * 100 : 0;
+  const rawChangePct = prev ? ((price - prev) / prev) * 100 : 0;
+  // 일일 변동폭 ±15% 초과 시 데이터 오류로 판단, 0으로 처리
+  const changePct = Math.abs(rawChangePct) > 15 ? 0 : rawChangePct;
   const volume = meta.regularMarketVolume || null;
   const avgVolume = meta.averageDailyVolume3Month || null;
   const volRatio = (volume && avgVolume) ? volume / avgVolume : null;
