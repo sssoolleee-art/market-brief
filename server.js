@@ -926,7 +926,12 @@ async function postDailyTweet(dayType = 'weekday') {
     const summary = [s1, s2, s3].filter(Boolean).join('\n');
     const tweetLabel = { weekday: '미장 마감', saturday: '주간 결산', sunday: '다음 주 프리뷰' }[dayType] || '미장 마감';
 
-    const tweetText = summary;
+    const TAGS = {
+      weekday:  '#서학개미 $SPY #미국주식',
+      saturday: '#서학개미 $SPY #주간결산',
+      sunday:   '#서학개미 $SPY #미국주식',
+    };
+    const tweetText = `${summary}\n\n${TAGS[dayType] || TAGS.weekday}`;
     const tweetPayload = { text: tweetText };
     if (mediaIds.length > 0) tweetPayload.media = { media_ids: mediaIds };
     await twitterClient.v2.tweet(tweetPayload);
